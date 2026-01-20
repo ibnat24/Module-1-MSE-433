@@ -1,37 +1,34 @@
 """
 Wheelchair Rugby Lineup Analytics (MSE433 Module 1 → Phase 2-ready)
 
-What this script does:
-
 PHASE 1 (Descriptive)
-(1) Lineup effectiveness:
-    - minutes, goals_for, goals_against, net_goals, net_per_min
-    - exports: outputs/lineup_effectiveness_by_team.csv
-               outputs/lineup_most_used_by_team.csv
-               outputs/lineup_best_by_team.csv
-
-(2) Physical rating vs scoring (two proxies):
-    (2A) Lineup-level: avg lineup rating vs goals/min + weighted correlation + binned summary
-        - exports: outputs/rating_scoring_lineup_level.csv
-    (2B) Player-attribution proxy: equal-split goals among 4 on-court players
-        - exports: outputs/rating_scoring_player_attrib.csv
+(1) Lineup effectiveness
+(2) Physical rating vs scoring (two proxies)
 
 PHASE 2 INPUTS (Predictive / Player-value metrics)
 (3) Player value metrics:
-    - RAPM (ridge regression on net goals/min, adjusted for teammates/opponents)
-    - On/Off impact (contextual net_per_min difference)
-    - Synergy residual (actual - predicted based on RAPM, minutes-weighted)
+    - NET RAPM (ridge regression on net goals/min, adjusted for teammates/opponents)
+    - CONTEXTUAL Split RAPM (fixed symmetry issue):
+        * O-RAPM_CTX: ridge on goals_for/min using TEAM-ONLY design matrix (+1 lineup players, 0 otherwise)
+        * D-RAPM_CTX: ridge on goals_against/min using TEAM-ONLY design matrix (+1 lineup players, 0 otherwise)
+        * NET_RAPM_CTX = O_RAPM_CTX - D_RAPM_CTX
+        * DEFENSE_VALUE_CTX = -D_RAPM_CTX  (higher = better defense)
+    - On/Off splits (Net + Offense + Defense)
+    - Synergy residual (actual - predicted based on NET RAPM, minutes-weighted)
     - Avg lineup net/min when on court
-    - exports: outputs/player_value_metrics.csv
 
-Plots (saved to outputs/plots):
-    - scoring_vs_lineup_avg_rating.png
-    - attrib_scoring_vs_rating.png
-    - top10_lineups_net_per_min.png
+Outputs:
+    outputs/lineup_effectiveness_by_team.csv
+    outputs/lineup_most_used_by_team.csv
+    outputs/lineup_best_by_team.csv
+    outputs/rating_scoring_lineup_level.csv
+    outputs/rating_scoring_player_attrib.csv
+    outputs/player_value_metrics.csv
 
-Expected input files:
-    data/stint_data.csv
-    data/player_data.csv
+Plots:
+    outputs/plots/scoring_vs_lineup_avg_rating.png
+    outputs/plots/attrib_scoring_vs_rating.png
+    outputs/plots/top10_lineups_net_per_min.png
 """
 
 import os
@@ -102,6 +99,7 @@ def canonical_lineup(players_4):
     vals = [str(v) for v in vals]
     return tuple(sorted(vals))
 
+
 # ============================================================
 # (1) LINEUP EFFECTIVENESS
 # ============================================================
@@ -146,10 +144,8 @@ lineup_eff["net_per_min"] = lineup_eff["net_goals"] / lineup_eff["minutes"]
 lineup_eff["gf_per_min"] = lineup_eff["goals_for"] / lineup_eff["minutes"]
 lineup_eff["ga_per_min"] = lineup_eff["goals_against"] / lineup_eff["minutes"]
 
-# Save full lineup effectiveness table
 lineup_eff.to_csv(os.path.join(OUT_DIR, "lineup_effectiveness_by_team.csv"), index=False)
 
-# Most-used lineups per team (by minutes)
 lineup_most_used = (
     lineup_eff.sort_values(["team", "minutes"], ascending=[True, False])
     .groupby("team", as_index=False)
@@ -157,7 +153,6 @@ lineup_most_used = (
 )
 lineup_most_used.to_csv(os.path.join(OUT_DIR, "lineup_most_used_by_team.csv"), index=False)
 
-# Best lineups per team (by net_per_min) with minimum minutes threshold
 MIN_MINUTES = 20.0
 lineup_best = (
     lineup_eff[lineup_eff["minutes"] >= MIN_MINUTES]
@@ -175,10 +170,10 @@ print(f"Saved: {OUT_DIR}/lineup_best_by_team.csv (top 10 by net_per_min per team
 print("\nTop 10 lineups overall by net_per_min (minutes >= threshold):")
 print(lineup_best.sort_values("net_per_min", ascending=False).head(10).to_string(index=False))
 
+
 # ============================================================
 # (2) PHYSICAL RATING vs SCORING (two proxies)
 # ============================================================
-
 def avg_rating(lineup_tuple):
     vals = [rating_map.get(p, np.nan) for p in lineup_tuple]
     vals = [v for v in vals if not pd.isna(v)]
@@ -221,9 +216,9 @@ bins = [-0.1, 1.0, 2.0, 3.0, 3.5]
 labels = ["<=1.0", "1.5-2.0", "2.5-3.0", "3.5"]
 rating_lineup_level["avg_rating_bin"] = pd.cut(rating_lineup_level["avg_rating"], bins=bins, labels=labels)
 
-# Avoid zero-weight bins by using observed=True (skips empty categorical bins)
+# Avoid pandas FutureWarning by selecting columns explicitly
 rating_lineup_summary = (
-    rating_lineup_level.groupby("avg_rating_bin", observed=True)
+    rating_lineup_level.groupby("avg_rating_bin", observed=True)[["minutes", "goals_per_min"]]
     .apply(
         lambda g: pd.Series(
             {
@@ -287,13 +282,11 @@ print(f"Saved: {OUT_DIR}/rating_scoring_player_attrib.csv")
 print("\nGoals-attributed-per-minute by rating (equal-split proxy):")
 print(rating_scoring.sort_values("rating").to_string(index=False))
 
+
 # ============================================================
 # (3) PLAYER VALUE METRICS (Phase 2 inputs)
-#     - RAPM (ridge regression) on net goals/min
-#     - On/Off impact
-#     - Synergy residual vs RAPM prediction
+#     - NET RAPM + CONTEXTUAL O/D RAPM + On/Off splits + Synergy
 # ============================================================
-
 print("\n=== (3) PLAYER VALUE METRICS (Phase 2 inputs) ===")
 
 # Team-perspective stints (each original stint becomes 2 rows: team + opponent)
@@ -323,48 +316,78 @@ away_view2 = pd.DataFrame(
 team_stints = pd.concat([home_view2, away_view2], ignore_index=True)
 team_stints["net_goals"] = team_stints["goals_for"] - team_stints["goals_against"]
 team_stints["net_per_min"] = team_stints["net_goals"] / team_stints["minutes"]
+team_stints["gf_per_min"] = team_stints["goals_for"] / team_stints["minutes"]
+team_stints["ga_per_min"] = team_stints["goals_against"] / team_stints["minutes"]
 
-# --- (3A) RAPM via Ridge Regression (Adjusted Plus/Minus) ---
+# -----------------------------
+# Ridge helper (closed-form)
+# -----------------------------
+def ridge_fit_closed_form(X, y, w, alpha=1.0):
+    """
+    Solve weighted ridge: min ||sqrt(w)(Xb - y)||^2 + alpha||b||^2
+    Returns b.
+    """
+    w = np.asarray(w, dtype=float)
+    y = np.asarray(y, dtype=float)
+    sw = np.sqrt(w)
+    Xw = X * sw[:, None]
+    yw = y * sw
+    XtX = Xw.T @ Xw
+    Xty = Xw.T @ yw
+    return np.linalg.solve(XtX + alpha * np.eye(X.shape[1]), Xty)
+
+# Player index
 players_list = pl["player"].astype(str).unique().tolist()
 p2i = {p: i for i, p in enumerate(players_list)}
-n = len(st)
-m = len(players_list)
+M = len(players_list)
+N2 = len(team_stints)
+w2 = team_stints["minutes"].to_numpy(dtype=float)
+alpha = 1.0
 
-# y = (h_goals - a_goals)/minutes
-y_r = ((st["h_goals"] - st["a_goals"]) / st["minutes"]).to_numpy(dtype=float)
-w_r = st["minutes"].to_numpy(dtype=float)
-
-X = np.zeros((n, m), dtype=float)
-
-# +1 for home players
-for col in home_cols:
-    vals = st[col].astype(str).to_numpy()
-    for r, p in enumerate(vals):
+# -----------------------------
+# Design matrix A: NET RAPM (signed)  +1 lineup, -1 opp lineup
+# -----------------------------
+X_net = np.zeros((N2, M), dtype=float)
+for r, (lu, olu) in enumerate(zip(team_stints["lineup"], team_stints["opp_lineup"])):
+    for p in lu:
         j = p2i.get(p)
         if j is not None:
-            X[r, j] += 1.0
-
-# -1 for away players
-for col in away_cols:
-    vals = st[col].astype(str).to_numpy()
-    for r, p in enumerate(vals):
+            X_net[r, j] += 1.0
+    for p in olu:
         j = p2i.get(p)
         if j is not None:
-            X[r, j] -= 1.0
+            X_net[r, j] -= 1.0
 
-# Weighted ridge closed-form: solve (X'WX + alpha I) b = X'W y
-alpha = 1.0  # tune later in Phase 2 if needed
-sw = np.sqrt(w_r)
-Xw = X * sw[:, None]
-yw = y_r * sw
+beta_net = ridge_fit_closed_form(X_net, team_stints["net_per_min"].to_numpy(), w2, alpha=alpha)
+rapm = pd.DataFrame({"player": players_list, "rapm": beta_net})
 
-XtX = Xw.T @ Xw
-Xty = Xw.T @ yw
-beta = np.linalg.solve(XtX + alpha * np.eye(m), Xty)
+# -----------------------------
+# Design matrix B: CONTEXTUAL O/D RAPM (team-only)  +1 lineup, 0 otherwise
+# This fixes the "offense mirrors defense" issue.
+# -----------------------------
+X_ctx = np.zeros((N2, M), dtype=float)
+for r, lu in enumerate(team_stints["lineup"]):
+    for p in lu:
+        j = p2i.get(p)
+        if j is not None:
+            X_ctx[r, j] += 1.0
 
-rapm = pd.DataFrame({"player": players_list, "rapm": beta})
+beta_off_ctx = ridge_fit_closed_form(X_ctx, team_stints["gf_per_min"].to_numpy(), w2, alpha=alpha)
+beta_def_ctx = ridge_fit_closed_form(X_ctx, team_stints["ga_per_min"].to_numpy(), w2, alpha=alpha)
 
-# --- (3B) Minutes played per player (team-context) ---
+split_ctx = pd.DataFrame(
+    {
+        "player": players_list,
+        "o_rapm_ctx": beta_off_ctx,
+        "d_rapm_ctx": beta_def_ctx,  # impact on goals allowed per minute; lower is better
+    }
+)
+split_ctx["net_rapm_ctx"] = split_ctx["o_rapm_ctx"] - split_ctx["d_rapm_ctx"]
+split_ctx["defense_value_ctx"] = -split_ctx["d_rapm_ctx"]  # higher = better
+
+# -----------------------------
+# Minutes played per player (team-context)
+# -----------------------------
 rows = []
 for team, lineup, mins in zip(team_stints["team"], team_stints["lineup"], team_stints["minutes"]):
     for p in lineup:
@@ -376,43 +399,65 @@ player_minutes = (
     .agg(minutes_played=("minutes", "sum"))
 )
 
-# --- (3C) On/Off impact ---
+# -----------------------------
+# On/Off impact SPLIT (net, offense, defense)
+# -----------------------------
 team_totals = (
     team_stints.groupby("team", as_index=False)
-    .agg(team_net_goals=("net_goals", "sum"), team_minutes=("minutes", "sum"))
+    .agg(
+        team_minutes=("minutes", "sum"),
+        team_gf=("goals_for", "sum"),
+        team_ga=("goals_against", "sum"),
+    )
 )
-team_totals["team_net_per_min"] = team_totals["team_net_goals"] / team_totals["team_minutes"]
+team_totals["team_gf_per_min"] = team_totals["team_gf"] / team_totals["team_minutes"]
+team_totals["team_ga_per_min"] = team_totals["team_ga"] / team_totals["team_minutes"]
+team_totals["team_net_per_min"] = (team_totals["team_gf"] - team_totals["team_ga"]) / team_totals["team_minutes"]
 
 rows = []
-for team, lineup, mins, netg in zip(
-    team_stints["team"], team_stints["lineup"], team_stints["minutes"], team_stints["net_goals"]
+for team, lineup, mins, gf, ga in zip(
+    team_stints["team"], team_stints["lineup"], team_stints["minutes"], team_stints["goals_for"], team_stints["goals_against"]
 ):
     for p in lineup:
-        rows.append({"team": team, "player": p, "on_minutes": mins, "on_net_goals": netg})
+        rows.append({"team": team, "player": p, "on_minutes": mins, "on_gf": gf, "on_ga": ga})
 
 on_tbl = (
     pd.DataFrame(rows)
     .groupby(["team", "player"], as_index=False)
-    .agg(on_minutes=("on_minutes", "sum"), on_net_goals=("on_net_goals", "sum"))
+    .agg(on_minutes=("on_minutes", "sum"), on_gf=("on_gf", "sum"), on_ga=("on_ga", "sum"))
 )
 
-onoff = on_tbl.merge(team_totals[["team", "team_net_goals", "team_minutes"]], on="team", how="left")
+onoff = on_tbl.merge(team_totals, on="team", how="left")
 onoff["off_minutes"] = onoff["team_minutes"] - onoff["on_minutes"]
-onoff["off_net_goals"] = onoff["team_net_goals"] - onoff["on_net_goals"]
+onoff["off_gf"] = onoff["team_gf"] - onoff["on_gf"]
+onoff["off_ga"] = onoff["team_ga"] - onoff["on_ga"]
 
-onoff["on_net_per_min"] = np.where(onoff["on_minutes"] > 0, onoff["on_net_goals"] / onoff["on_minutes"], np.nan)
-onoff["off_net_per_min"] = np.where(onoff["off_minutes"] > 0, onoff["off_net_goals"] / onoff["off_minutes"], np.nan)
+onoff["on_gf_per_min"] = np.where(onoff["on_minutes"] > 0, onoff["on_gf"] / onoff["on_minutes"], np.nan)
+onoff["on_ga_per_min"] = np.where(onoff["on_minutes"] > 0, onoff["on_ga"] / onoff["on_minutes"], np.nan)
+onoff["on_net_per_min"] = onoff["on_gf_per_min"] - onoff["on_ga_per_min"]
+
+onoff["off_gf_per_min"] = np.where(onoff["off_minutes"] > 0, onoff["off_gf"] / onoff["off_minutes"], np.nan)
+onoff["off_ga_per_min"] = np.where(onoff["off_minutes"] > 0, onoff["off_ga"] / onoff["off_minutes"], np.nan)
+onoff["off_net_per_min"] = onoff["off_gf_per_min"] - onoff["off_ga_per_min"]
+
+onoff["on_off_gf_per_min"] = onoff["on_gf_per_min"] - onoff["off_gf_per_min"]
+onoff["on_off_ga_per_min"] = onoff["on_ga_per_min"] - onoff["off_ga_per_min"]  # negative is good
 onoff["on_off_net_per_min"] = onoff["on_net_per_min"] - onoff["off_net_per_min"]
 
-# --- (3D) Synergy residual (Actual - Predicted) ---
-beta_map = dict(zip(rapm["player"], rapm["rapm"]))
+# -----------------------------
+# Synergy residual (Actual - Predicted based on NET RAPM)
+# -----------------------------
+beta_map_net = dict(zip(rapm["player"], rapm["rapm"]))
 
-def lineup_value(lineup_tuple):
+def lineup_value(lineup_tuple, beta_map):
     if not lineup_tuple:
         return 0.0
     return float(np.sum([beta_map.get(p, 0.0) for p in lineup_tuple]))
 
-team_stints["pred_net_per_min"] = team_stints["lineup"].apply(lineup_value) - team_stints["opp_lineup"].apply(lineup_value)
+team_stints["pred_net_per_min"] = (
+    team_stints["lineup"].apply(lambda lu: lineup_value(lu, beta_map_net))
+    - team_stints["opp_lineup"].apply(lambda lu: lineup_value(lu, beta_map_net))
+)
 team_stints["residual_net_per_min"] = team_stints["net_per_min"] - team_stints["pred_net_per_min"]
 
 rows = []
@@ -431,7 +476,9 @@ syn["synergy_residual_net_per_min"] = np.where(
     syn["resid_minutes"] > 0, syn["resid_x_minutes"] / syn["resid_minutes"], np.nan
 )
 
-# --- (3E) Avg lineup net/min when on (context performance) ---
+# -----------------------------
+# Avg lineup net/min when on (context performance)
+# -----------------------------
 rows = []
 for team, lineup, mins, netpm in zip(
     team_stints["team"], team_stints["lineup"], team_stints["minutes"], team_stints["net_per_min"]
@@ -448,25 +495,47 @@ avg_netpm["avg_lineup_net_per_min_when_on"] = np.where(
     avg_netpm["m"] > 0, avg_netpm["netpm_x_m"] / avg_netpm["m"], np.nan
 )
 
-# --- (3F) Combine into one Phase 2 input table ---
+# -----------------------------
+# Combine into one Phase 2 input table
+# -----------------------------
 player_values = (
     player_minutes
-    .merge(onoff[["team", "player", "on_net_per_min", "off_net_per_min", "on_off_net_per_min"]],
-           on=["team", "player"], how="left")
-    .merge(syn[["team", "player", "synergy_residual_net_per_min"]],
-           on=["team", "player"], how="left")
-    .merge(avg_netpm[["team", "player", "avg_lineup_net_per_min_when_on"]],
-           on=["team", "player"], how="left")
+    .merge(
+        onoff[
+            [
+                "team", "player",
+                "on_gf_per_min", "on_ga_per_min", "on_net_per_min",
+                "off_gf_per_min", "off_ga_per_min", "off_net_per_min",
+                "on_off_gf_per_min", "on_off_ga_per_min", "on_off_net_per_min",
+            ]
+        ],
+        on=["team", "player"],
+        how="left",
+    )
+    .merge(syn[["team", "player", "synergy_residual_net_per_min"]], on=["team", "player"], how="left")
+    .merge(avg_netpm[["team", "player", "avg_lineup_net_per_min_when_on"]], on=["team", "player"], how="left")
     .merge(pl[["player", "rating"]], on="player", how="left")
-    .merge(rapm, on="player", how="left")  # RAPM is global
+    .merge(rapm, on="player", how="left")
+    .merge(split_ctx, on="player", how="left")
 )
 
 out_player_values = os.path.join(OUT_DIR, "player_value_metrics.csv")
 player_values.sort_values(["team", "rapm"], ascending=[True, False]).to_csv(out_player_values, index=False)
 
 print(f"Saved: {out_player_values}")
-print("\nTop 10 players by RAPM (overall):")
+
+print("\nTop 10 players by NET RAPM (overall):")
 print(rapm.sort_values("rapm", ascending=False).head(10).to_string(index=False))
+
+print("\nTop 10 players by CONTEXTUAL O-RAPM (overall):")
+print(split_ctx.sort_values("o_rapm_ctx", ascending=False).head(10)[["player", "o_rapm_ctx"]].to_string(index=False))
+
+print("\nTop 10 players by CONTEXTUAL DEFENSE value (overall) [higher = better]:")
+print(split_ctx.sort_values("defense_value_ctx", ascending=False).head(10)[["player", "defense_value_ctx"]].to_string(index=False))
+
+print("\nTop 10 players by CONTEXTUAL NET (O-D) (overall):")
+print(split_ctx.sort_values("net_rapm_ctx", ascending=False).head(10)[["player", "net_rapm_ctx"]].to_string(index=False))
+
 
 # ============================================================
 # Plots (saved)
