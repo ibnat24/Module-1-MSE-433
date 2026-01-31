@@ -1,17 +1,3 @@
-"""
-PHASE 1: Player Value Quantification with Statistical Validation (FIXED)
-MSE433 Case Study - Wheelchair Rugby Lineup Optimization
-
-Fixed to work with actual data structure (no 'team' column in player_data.csv)
-
-Usage:
-    python3 wcr_lineup_analytics_with_validation.py
-
-Outputs:
-    - outputs/player_value_metrics.csv (player RAPM values)
-    - outputs/validation_results.txt (statistical validation report)
-"""
-
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import Ridge, LinearRegression

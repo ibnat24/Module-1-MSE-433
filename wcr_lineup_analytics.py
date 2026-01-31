@@ -1,36 +1,3 @@
-"""
-Wheelchair Rugby Lineup Analytics (MSE433 Module 1 → Phase 2-ready)
-
-PHASE 1 (Descriptive)
-(1) Lineup effectiveness
-(2) Physical rating vs scoring (two proxies)
-
-PHASE 2 INPUTS (Predictive / Player-value metrics)
-(3) Player value metrics:
-    - NET RAPM (ridge regression on net goals/min, adjusted for teammates/opponents)
-    - CONTEXTUAL Split RAPM (fixed symmetry issue):
-        * O-RAPM_CTX: ridge on goals_for/min using TEAM-ONLY design matrix (+1 lineup players, 0 otherwise)
-        * D-RAPM_CTX: ridge on goals_against/min using TEAM-ONLY design matrix (+1 lineup players, 0 otherwise)
-        * NET_RAPM_CTX = O_RAPM_CTX - D_RAPM_CTX
-        * DEFENSE_VALUE_CTX = -D_RAPM_CTX  (higher = better defense)
-    - On/Off splits (Net + Offense + Defense)
-    - Synergy residual (actual - predicted based on NET RAPM, minutes-weighted)
-    - Avg lineup net/min when on court
-
-Outputs:
-    outputs/lineup_effectiveness_by_team.csv
-    outputs/lineup_most_used_by_team.csv
-    outputs/lineup_best_by_team.csv
-    outputs/rating_scoring_lineup_level.csv
-    outputs/rating_scoring_player_attrib.csv
-    outputs/player_value_metrics.csv
-
-Plots:
-    outputs/plots/scoring_vs_lineup_avg_rating.png
-    outputs/plots/attrib_scoring_vs_rating.png
-    outputs/plots/top10_lineups_net_per_min.png
-"""
-
 import os
 import numpy as np
 import pandas as pd

@@ -1,8 +1,3 @@
-"""
-Wheelchair Rugby Optimization - Visualization
-Generates plots to support optimization analysis
-"""
-
 import os
 import numpy as np
 import pandas as pd

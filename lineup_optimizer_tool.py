@@ -1,19 +1,3 @@
-"""
-WHEELCHAIR RUGBY LINEUP OPTIMIZER TOOL
-Interactive decision support system for optimal lineup selection
-
-Features:
-- Opponent-specific optimization
-- Injury management  
-- Fatigue tracking
-- Minimum playing time constraints
-- Multiple lineup scenarios
-- Update with new game data
-
-Usage:
-    python3 lineup_optimizer_tool.py
-"""
-
 import os
 import json
 import numpy as np

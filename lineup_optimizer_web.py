@@ -1,15 +1,3 @@
-"""
-WHEELCHAIR RUGBY LINEUP OPTIMIZER - ADVANCED DRAG & DROP
-Interactive web application with dual lineup builder (Your team + Opponent)
-
-Installation:
-    pip install flask pandas numpy --break-system-packages
-
-Usage:
-    python3 lineup_optimizer_advanced.py
-    Then open browser to: http://localhost:5000
-"""
-
 from flask import Flask, render_template_string, request, jsonify
 import pandas as pd
 import numpy as np

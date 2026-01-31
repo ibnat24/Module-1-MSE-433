@@ -1,27 +1,3 @@
-"""
-Wheelchair Rugby Lineup Optimization (MSE433 Module 1 → Phase 2)
-
-PHASE 2: OPTIMIZATION MODEL
-Uses player value metrics from Phase 1 to find optimal lineups
-
-Key Constraints:
-- Exactly 4 players on court
-- Sum of physical ratings ≤ 8.0 (+ 0.5 per female player)
-- Binary selection variables
-
-Objective Functions (multiple scenarios):
-1. Maximize NET RAPM (baseline individual value)
-2. Maximize NET RAPM_CTX (contextual net impact)
-3. Maximize O-RAPM_CTX (offensive focus)
-4. Maximize DEFENSE_VALUE_CTX (defensive focus)
-5. Maximize On/Off Net Impact
-6. Balanced lineup (combination of offense + defense)
-
-Outputs:
-    outputs/optimal_lineups_summary.csv
-    outputs/optimal_lineups_detailed.csv
-"""
-
 import os
 import numpy as np
 import pandas as pd
