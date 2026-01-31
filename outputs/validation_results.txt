@@ -1,0 +1,53 @@
+================================================================================
+STATISTICAL VALIDATION RESULTS
+Wheelchair Rugby Lineup Optimization - Phase 1
+================================================================================
+
+CROSS-VALIDATION (5-FOLD)
+--------------------------------------------------------------------------------
+ fold       r2     rmse      mae  train_size  val_size
+    1 0.086285 1.409832 1.042535        5950      1488
+    2 0.095244 1.392903 1.012691        5950      1488
+    3 0.096499 1.408237 1.023632        5950      1488
+    4 0.085685 1.420062 1.036701        5951      1487
+    5 0.087758 1.372886 1.041325        5951      1487
+
+Mean ± Std:
+  R²:   0.0903 ± 0.0052
+  RMSE: 1.4008 ± 0.0184
+  MAE:  1.0314 ± 0.0129
+
+RESIDUAL ANALYSIS
+--------------------------------------------------------------------------------
+Shapiro-Wilk Test (Normality):
+  Statistic: 0.9677
+  p-value:   0.0000
+  Result:    Slight deviation (OK for sports data)
+
+Levene's Test (Homoscedasticity):
+  Statistic: 0.0923
+  p-value:   0.7613
+  Result:    Homoscedastic ✓
+
+Durbin-Watson Test (Independence):
+  Statistic: 1.9512
+  Result:    Independent ✓
+
+BASELINE MODEL COMPARISON
+--------------------------------------------------------------------------------
+Model                          R²         RMSE       MAE       
+Ridge RAPM (α=1000)           0.1086    1.3872    1.0208
+Ordinary Least Squares        0.1867    1.3250    0.9694
+Simple Rating Average        -0.8125    1.9781    1.5545
+Baseline (Mean)               0.0000    1.4693    1.0900
+
+SENSITIVITY ANALYSIS
+--------------------------------------------------------------------------------
+ alpha       r2     rmse top_player  top_rapm
+   100 0.173596 1.335668  Brazil_p1  0.443238
+   500 0.135344 1.366231  Japan_p12  0.242352
+  1000 0.108623 1.387181  Japan_p12  0.163760
+  5000 0.045842 1.435200   Japan_p7  0.052543
+ 10000 0.026176 1.449915   Japan_p7  0.029251
+
+Stability: R² std = 0.0614
